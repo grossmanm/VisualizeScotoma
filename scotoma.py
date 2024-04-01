@@ -29,9 +29,10 @@ class ScotomaWrapper(ft.UserControl):
 
         while True:
             _,frame=cap.read()
-
-            h, w, _ = image.shape
-            frame[10:10+h, 10:10+w] = image  # Adjust position as needed
+            image_dims = frame.shape
+            image_height, image_width = image_dims[0], image_dims[1]
+            h, w, _ = image.shape 
+            frame[(image_height//2)-(h//2):(image_height//2)+(h//2), (image_width//2)-((w//2)+1):(image_width//2)+(w//2)] = image  # Adjust position as needed
             
 
             _,im_arr = cv2.imencode(".png", frame)
