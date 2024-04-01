@@ -8,5 +8,5 @@ This is to help people with scotoma read.
 ### Pre-reqs
 Make sure you have the required libraries installed: 
 - flet (`pip install flet`)
-- cv2 (`pip install`)
+- cv2 (`pip install opencv-python`)
 - base64
