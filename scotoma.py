@@ -3,10 +3,10 @@ import cv2
 import base64
 
 
-# initailze camera
+# initialize camera
 cap = cv2.VideoCapture(0)
 
-class SarcomaWarper(ft.UserControl):
+class ScotomaWarper(ft.UserControl):
 
     def __init__(self):
         super().__init__()
@@ -45,7 +45,7 @@ section = ft.Container(
                     ft.Text("Camera", size=30, weight="bold",
                             color="white"
                             ),
-                        SarcomaWarper()
+                        ScotomaWarper()
                 ])
             )
         )
