@@ -2,6 +2,7 @@ import flet as ft
 import cv2
 import numpy as np
 import base64
+import pytesseract
 
 
 # initialize camera
@@ -37,6 +38,18 @@ class ScotomaWrapper(ft.UserControl):
             cv2.circle(frame, tangent_center, int(tangent_radius), self.tangent_color, -1)
 
 
+            # OCR
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+           # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            #gray = clahe.apply(gray)
+            gray = cv2.Canny(gray, threshold1=30, threshold2=100)
+            text = pytesseract.image_to_string(gray)
+            print(text)
+            #d = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            #n_boxes = len(d['level'])
+            #for i in range(n_boxes):
+            #    (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
+            #    cv2.rectangle(gray, (x,y), (x+w, y+h), (0,255,0),2)
             _, im_arr = cv2.imencode(".png", frame)
             im_b64 = base64.b64encode(im_arr)
             self.img.src_base64 = im_b64.decode('utf-8')
