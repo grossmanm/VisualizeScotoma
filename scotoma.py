@@ -30,12 +30,12 @@ class ScotomaWrapper(ft.UserControl):
             # DRAW SCOTOMA
             circle_center = (image_width // 2, image_height // 2)
             radius = scotoma_radius
-            cv2.circle(frame, circle_center, radius, (0, 0, 0), -1)  # -1 means filled circle
+            #cv2.circle(frame, circle_center, radius, (0, 0, 0), -1)  # -1 means filled circle
 
             # DRAW ADJACANT TO SCOTOMA
             tangent_radius = scotoma_radius / 4  # Adjust this as you want
             tangent_center = (int(circle_center[0] + scotoma_radius + tangent_radius), circle_center[1])
-            cv2.circle(frame, tangent_center, int(tangent_radius), self.tangent_color, -1)
+           # cv2.circle(frame, tangent_center, int(tangent_radius), self.tangent_color, -1)
 
 
             # OCR
@@ -43,14 +43,14 @@ class ScotomaWrapper(ft.UserControl):
            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             #gray = clahe.apply(gray)
             gray = cv2.Canny(gray, threshold1=30, threshold2=100)
-            text = pytesseract.image_to_string(gray)
-            print(text)
-            #d = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
-            #n_boxes = len(d['level'])
-            #for i in range(n_boxes):
-            #    (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
-            #    cv2.rectangle(gray, (x,y), (x+w, y+h), (0,255,0),2)
-            _, im_arr = cv2.imencode(".png", frame)
+           # text = pytesseract.image_to_string(gray)
+            #print(text)
+            d = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            n_boxes = len(d['level'])
+            for i in range(n_boxes):
+                (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
+                cv2.rectangle(gray, (x,y), (x+w, y+h), (255,255,255),2)
+            _, im_arr = cv2.imencode(".png", gray)
             im_b64 = base64.b64encode(im_arr)
             self.img.src_base64 = im_b64.decode('utf-8')
             self.update()
