@@ -8,7 +8,7 @@ import pytesseract
 # initialize camera
 cap = cv2.VideoCapture(0)
 # Control the size of the scotoma
-scotoma_radius = 180
+scotoma_radius = 100
 
 class ScotomaWrapper(ft.UserControl):
 
@@ -42,6 +42,7 @@ class ScotomaWrapper(ft.UserControl):
 
             #ocr_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
             #ocr_frame[:, :, 3] = mask[:, :, 0]
+            read_frame = np.copy(frame)
             cv2.circle(frame, circle_center, radius, (0, 0, 0), -1)  # -1 means filled circle
 
             # DRAW ADJACANT TO SCOTOMA
@@ -60,12 +61,26 @@ class ScotomaWrapper(ft.UserControl):
            # text = pytesseract.image_to_string(gray)
             #print(text)
             d = pytesseract.image_to_data(ocr_frame, output_type=pytesseract.Output.DICT)
-            print(d)
             n_boxes = len(d['level'])
            # for i in range(n_boxes):
              #   if d['level'][i] == 5 and d['conf'][i] >= 40:
              #       (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
             #        cv2.rectangle(ocr_frame, (x,y), (x+w, y+h), (255,255,255),2)
+            # redraw text outside of scotoma
+            for i in range(n_boxes):
+                if d['level'][i] == 5 and d['width'][i]<200 and d['height'][i]<200:
+                    text_left = d['left'][i]
+                    text_top = d['top'][i]
+                    text_width = d['width'][i]
+                    text_height = d['height'][i]
+                    # for now just move the text above the circle
+                    new_text_left = text_left
+                    new_text_top = circle_center[1]-radius-text_height
+                    frame[new_text_top:new_text_top+text_height,
+                          new_text_left:new_text_left+text_width,] = read_frame[
+                        text_top:text_top+text_height,
+                        text_left:text_left+text_width,]
+                    
             _, im_arr = cv2.imencode(".png", frame)
             im_b64 = base64.b64encode(im_arr)
             self.img.src_base64 = im_b64.decode('utf-8')
@@ -109,7 +124,7 @@ def main(page: ft.Page):
     page.theme_mode='light'
 
     # Allow the user to change the size of the scotoma
-    txt_number = ft.TextField(value="180", text_align=ft.TextAlign.RIGHT, width=100)
+    txt_number = ft.TextField(value=str(scotoma_radius), text_align=ft.TextAlign.RIGHT, width=100)
     def decrement_click(e):
         global scotoma_radius
         txt_number.value = str(int(txt_number.value) - 1)
