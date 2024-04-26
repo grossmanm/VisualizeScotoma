@@ -7,6 +7,7 @@ import pytesseract
 
 # initialize camera
 cap = cv2.VideoCapture(0)
+prev_cap = None
 # Control the size of the scotoma
 scotoma_radius = 100
 
@@ -76,11 +77,26 @@ class ScotomaWrapper(ft.UserControl):
                     # for now just move the text above the circle
                     new_text_left = text_left
                     new_text_top = circle_center[1]-radius-text_height
-                    frame[new_text_top:new_text_top+text_height,
-                          new_text_left:new_text_left+text_width,] = read_frame[
+                    if new_text_top < 0:
+                        continue
+
+                    # curve the text
+                    rect = read_frame[
                         text_top:text_top+text_height,
-                        text_left:text_left+text_width,]
-                    
+                        text_left:text_left+text_width,:]
+                    curve = frame[new_text_top:new_text_top+text_height,
+                         new_text_left:new_text_left+text_width,:]
+                    M = cv2.getPerspectiveTransform(rect,curve)
+
+                    frame = cv2.warpPerspective(frame, M, frame.shape)
+
+                    #draw the 
+
+                    #frame[new_text_top:new_text_top+text_height,
+                    #    new_text_left:new_text_left+text_width,] = read_frame[
+                    #    text_top:text_top+text_height,
+                    #    text_left:text_left+text_width,]
+
             _, im_arr = cv2.imencode(".png", frame)
             im_b64 = base64.b64encode(im_arr)
             self.img.src_base64 = im_b64.decode('utf-8')
@@ -118,10 +134,11 @@ camera_container = ft.Container(
 
 def main(page: ft.Page):
     page.title = "Visualize Scotoma"
-    page.vertical_alignment = ft.MainAxisAlignment.CENTER
-    page.padding=50
-    page.window_left=page.window_left+100
-    page.theme_mode='light'
+    #page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    #page.width
+    #page.padding=50
+    #page.window_left=page.window_left+100
+    #page.theme_mode='light'
 
     # Allow the user to change the size of the scotoma
     txt_number = ft.TextField(value=str(scotoma_radius), text_align=ft.TextAlign.RIGHT, width=100)
