@@ -5,7 +5,6 @@ import base64
 import pytesseract
 import time
 
-
 # initialize camera
 cap = cv2.VideoCapture(0)
 # Control the size of the scotoma
@@ -21,6 +20,7 @@ class ScotomaWrapper(ft.UserControl):
         self.last_draw_time = time.time()
         self.overlay_text = None
         self.curve_text = None
+        self.prev_ocr_frame = None
 
 
 
@@ -62,13 +62,32 @@ class ScotomaWrapper(ft.UserControl):
             # By default OpenCV stores images in BGR format and since pytesseract assumes RGB format,
             # we need to convert from BGR to RGB format/mode:
             ocr_frame = cv2.cvtColor(ocr_frame, cv2.COLOR_BGR2RGB)
+
+            # normalize frame
+            norm_img = np.zeros((ocr_frame.shape[0], ocr_frame.shape[1]))
+            ocr_frame = cv2.normalize(ocr_frame, norm_img, 0, 255, cv2.NORM_MINMAX)
+            
+            
+
+
             # Convert to greyscale 
             ocr_frame = cv2.cvtColor(ocr_frame, cv2.COLOR_BGR2GRAY)
-            # ocr_frame = cv2.Canny(ocr_frame, threshold1=30, threshold2=100)
-            ocr_frame = cv2.Canny(ocr_frame, threshold1=255/3, threshold2=255)
+            #ocr_frame = cv2.Canny(ocr_frame, threshold1=30, threshold2=100)
+            #ocr_frame = cv2.Canny(ocr_frame, threshold1=255/3, threshold2=255)
             # thresholding
-            # ocr_frame = cv2.threshold(ocr_frame, 200, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+            ocr_frame = cv2.adaptiveThreshold(ocr_frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, 6)
+            #ocr_frame = cv2.threshold(ocr_frame, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
+            if type(self.prev_ocr_frame) is not type(None):
+                diff = cv2.absdiff(ocr_frame, self.prev_ocr_frame)
+                total_size = self.prev_ocr_frame.size
+                num_diff_pixels = np.count_nonzero(diff)
+                percent_diff = (num_diff_pixels/total_size)
+                print(percent_diff)
+                if percent_diff < 0.013:
+                   ocr_frame = self.prev_ocr_frame
+            self.prev_ocr_frame = ocr_frame
 
+            
             # https://stackoverflow.com/questions/60009533/drawing-bounding-boxes-with-pytesseract-opencv
             # --psm 6: This parameter sets the page segmentation mode (PSM) to 6. Page segmentation mode determines how 
             #          Tesseract should interpret the structure of the input image during OCR. PSM 6, also known as 
@@ -78,6 +97,7 @@ class ScotomaWrapper(ft.UserControl):
             # custom_config = r'-c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ --psm 6'
             # d = pytesseract.image_to_data(ocr_frame, output_type=pytesseract.Output.DICT, lang='eng', config=custom_config)
             d = pytesseract.image_to_data(ocr_frame, output_type=pytesseract.Output.DICT)
+           # print(d)
             n_boxes = len(d['level'])
 
             # Check if it's time to trigger OCR again (15 secs since u last drew)
@@ -90,8 +110,65 @@ class ScotomaWrapper(ft.UserControl):
             #       (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
             #        cv2.rectangle(ocr_frame, (x,y), (x+w, y+h), (255,255,255),2)
 
-            # redraw text outside of scotoma
+
+            clean_output = {'left':[], 'top':[], 'width':[], 'height':[]}
+            # clean up boxes to remove overlaps and certain levels
             for i in range(n_boxes):
+                if d['level'][i] >= 2 and d['width'][i] < 200 and d['height'][i] < 200:
+                    cur_left = d['left'][i]
+                    cur_top = d['top'][i]
+                    cur_width = d['width'][i]
+                    cur_height = d['height'][i]
+                    area_cur = cur_width*cur_height
+
+                    overlap_indices = []
+                    did_overlap = False
+
+                    # check for overlaps
+                    for j in range(len(clean_output['left'])):
+                        old_left = clean_output['left'][j]
+                        old_top = clean_output['top'][j]
+                        old_width = clean_output['width'][j]
+                        old_height = clean_output['height'][j]
+
+                        # calculate coordiantes of intersection rectangle
+                        x1 = max(cur_left, old_left)
+                        y1 = max(cur_top, old_top)
+                        x2 = min(cur_left+cur_width,old_left+old_width)
+                        y2 = min(cur_top+cur_height,old_top+old_height)
+
+                        if x2 <= x1 or y2 <= y1:
+                            # no overlap
+                            continue
+                        did_overlap = True
+                        intersection_area = (x2-x1)*(y2-y1)
+
+                        area_old = old_width*old_height
+
+                        overlap = (intersection_area/min(area_cur, area_old))
+                        
+                        # if the overlap is over 50% just use the bigger one:
+                        if overlap >= 0.5 and area_cur > area_old:
+                            overlap_indices.append(j)
+                          
+                    if len(overlap_indices) == 0 and not did_overlap:
+                        clean_output['left'].append(cur_left)
+                        clean_output['top'].append(cur_top)
+                        clean_output['width'].append(cur_width)
+                        clean_output['height'].append(cur_height)
+                    else:
+                        num_pops = 0
+                        for j in overlap_indices:
+                            # remove overlaps
+                            clean_output['left'].pop(j-num_pops)
+                            clean_output['top'].pop(j-num_pops)
+                            clean_output['width'].pop(j-num_pops)
+                            clean_output['height'].pop(j-num_pops)
+                            num_pops+=1
+                    
+
+            # redraw text outside of scotoma
+            for i in range(len(clean_output['left'])):
                 # LEVELS:
                 # 1. page
                 # 2. block
@@ -99,43 +176,46 @@ class ScotomaWrapper(ft.UserControl):
                 # 4. line
                 # 5. word
 
-                if d['level'][i] == 5 and d['width'][i]<200 and d['height'][i]<200 and d["conf"][i] > 80 and (d['width'][i] > 20 and d['height'][i] > 10):
-                    print(".")
-                    text_left = d['left'][i]
-                    text_top = d['top'][i]
-                    text_width = d['width'][i] + 20
-                    text_height = d['height'][i] + 5
-                    text_test = d['text'][i]
-                    confidence = d["conf"][i]
-                    print(confidence)
+                #if d['level'][i] == 5 and d['width'][i]<200 and d['height'][i]<200 and d["conf"][i] > 80 and (d['width'][i] > 20 and d['height'][i] > 10):
+               # if d['level'][i] >= 2 and d['width'][i] < 200 and d['height'][i] <200:
+                #print(".")
+                text_left = clean_output['left'][i]
+                text_top = clean_output['top'][i]
+                text_width = clean_output['width'][i] 
+                text_height = clean_output['height'][i]
+               # text_test = clean_output['text'][i]
+                #confidence = clean_output["conf"][i]
+                #print(confidence)
 
-                    # for now just move the text above the circle
-                    new_text_left = text_left
-                    new_text_top = circle_center[1]-radius-text_height
+                # for now just move the text above the circle
+                new_text_left = text_left
+                new_text_top = circle_center[1]-radius-text_height
 
-                    # unless its too big, then move it to the right
-                    if new_text_top < 0:
-                        print("Scotoma too big!")
-                        new_text_top = circle_center[1] - text_height // 2
-                        new_text_left = circle_center[0] + radius + 10
+                # unless its too big, then move it to the right
+                if new_text_top < 0:
+                    print("Scotoma too big!")
+                    new_text_top = circle_center[1] - text_height // 2
+                    new_text_left = circle_center[0] + radius + 10
 
-                    # Store the drawn text for the overla
-    
-                    self.overlay_text = read_frame[
-                            text_top:text_top+text_height,
-                            text_left:text_left+text_width,:]
-                    
+                # Store the drawn text for the overla
 
-                    self.curve_text = frame[new_text_top:new_text_top+text_height,
-                         new_text_left:new_text_left+text_width,:]
-                    
-                    self.last_draw_time = time.time()
-                    self.just_drew = True
-                    # frame[new_text_top:new_text_top+text_height,
-                    #     new_text_left:new_text_left+text_width,] = read_frame[
-                    #     text_top:text_top+text_height,
-                    #     text_left:text_left+text_width,]
-                    # time.sleep(5)
+                self.overlay_text = read_frame[
+                        text_top:text_top+text_height,
+                        text_left:text_left+text_width,:]
+                
+
+                self.curve_text = frame[new_text_top:new_text_top+text_height,
+                        new_text_left:new_text_left+text_width,:]
+                
+                self.last_draw_time = time.time()
+                self.just_drew = True
+                # frame[new_text_top:new_text_top+text_height,
+                #     new_text_left:new_text_left+text_width,] = read_frame[
+                #     text_top:text_top+text_height,
+                #     text_left:text_left+text_width,]
+                # time.sleep(5)
+                # draw box for debugging
+                #cv2.rectangle(ocr_frame, (text_left, text_top), (text_left+text_width, text_top+text_height), (0,0,0), 5)
 
             if self.overlay_text is not None:
                 self.overlay_text = self.overlay_text.astype(np.float32)
@@ -144,6 +224,8 @@ class ScotomaWrapper(ft.UserControl):
                 #frame = cv2.warpPerspective(frame, M, frame.shape)
                 frame[new_text_top:new_text_top+text_height,
                          new_text_left:new_text_left+text_width,:] = self.overlay_text
+                
+           
 
             _, im_arr = cv2.imencode(".png", frame)
             im_b64 = base64.b64encode(im_arr)
