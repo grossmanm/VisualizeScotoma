@@ -7,6 +7,15 @@ import time
 
 # initialize camera
 cap = cv2.VideoCapture(0)
+
+# New libaries make camera sizes wonky for Yan and I. Forcing a standard size
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+if not cap.isOpened():
+    print("Error: Unable to open camera. Camera didn't open successfully. Did you make sure it's not connected to ur phone and ur phone sync isn't being slow?")
+    exit()
+
 # Control the size of the scotoma
 scotoma_radius = 100
 
@@ -14,15 +23,12 @@ class ScotomaWrapper(ft.UserControl):
 
     def __init__(self):
         super().__init__()
-        self.tangent_color = (0, 0, 255)  # red
         self.last_move_time = time.time()
         self.just_drew = False
         self.last_draw_time = time.time()
         self.overlay_text = None
         self.curve_text = None
         self.prev_ocr_frame = None
-
-
 
     def did_mount(self):
         self.update_timer()
@@ -34,28 +40,19 @@ class ScotomaWrapper(ft.UserControl):
             image_dims = frame.shape
             image_height, image_width = image_dims[0], image_dims[1]
 
-           
-
             # DRAW SCOTOMA
             circle_center = (image_width // 2, image_height // 2)
-            radius = scotoma_radius
 
             # cut image to within the scotoma for OCR analysis
             mask = np.zeros_like(frame)
-            cv2.circle(mask, circle_center, radius, (255,255,255),-1)
+            cv2.circle(mask, circle_center, scotoma_radius, (255,255,255),-1)
 
             ocr_frame = cv2.bitwise_and(frame,mask)     
-
 
             #ocr_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
             #ocr_frame[:, :, 3] = mask[:, :, 0]
             read_frame = np.copy(frame)
-            cv2.circle(frame, circle_center, radius, (0, 0, 0), -1)  # -1 means filled circle
-
-            # DRAW ADJACANT TO SCOTOMA
-            tangent_radius = scotoma_radius / 4  # Adjust this as you want
-            tangent_center = (int(circle_center[0] + scotoma_radius + tangent_radius), circle_center[1])
-            # cv2.circle(frame, tangent_center, int(tangent_radius), self.tangent_color, -1)
+            cv2.circle(frame, circle_center, scotoma_radius, (0, 0, 0), -1)  # -1 means filled circle
 
             # OCR
             # we need to convert from BGR to RGB format/mode:
@@ -66,9 +63,6 @@ class ScotomaWrapper(ft.UserControl):
             # normalize frame
             norm_img = np.zeros((ocr_frame.shape[0], ocr_frame.shape[1]))
             ocr_frame = cv2.normalize(ocr_frame, norm_img, 0, 255, cv2.NORM_MINMAX)
-            
-            
-
 
             # Convert to greyscale 
             ocr_frame = cv2.cvtColor(ocr_frame, cv2.COLOR_BGR2GRAY)
@@ -114,6 +108,13 @@ class ScotomaWrapper(ft.UserControl):
             clean_output = {'left':[], 'top':[], 'width':[], 'height':[]}
             # clean up boxes to remove overlaps and certain levels
             for i in range(n_boxes):
+                # Filter out small, insignificant bounding box
+                # LEVELS:
+                # 1. page
+                # 2. block
+                # 3. paragraph
+                # 4. line
+                # 5. word
                 if d['level'][i] >= 2 and d['width'][i] < 200 and d['height'][i] < 200:
                     cur_left = d['left'][i]
                     cur_top = d['top'][i]
@@ -169,61 +170,40 @@ class ScotomaWrapper(ft.UserControl):
 
             # redraw text outside of scotoma
             for i in range(len(clean_output['left'])):
-                # LEVELS:
-                # 1. page
-                # 2. block
-                # 3. paragraph
-                # 4. line
-                # 5. word
-
-                #if d['level'][i] == 5 and d['width'][i]<200 and d['height'][i]<200 and d["conf"][i] > 80 and (d['width'][i] > 20 and d['height'][i] > 10):
-               # if d['level'][i] >= 2 and d['width'][i] < 200 and d['height'][i] <200:
-                #print(".")
                 text_left = clean_output['left'][i]
                 text_top = clean_output['top'][i]
                 text_width = clean_output['width'][i] 
                 text_height = clean_output['height'][i]
-               # text_test = clean_output['text'][i]
-                #confidence = clean_output["conf"][i]
-                #print(confidence)
+                # text_test = clean_output['text'][i]
 
                 # for now just move the text above the circle
                 new_text_left = text_left
-                new_text_top = circle_center[1]-radius-text_height
+                new_text_top = circle_center[1]-scotoma_radius-text_height
 
                 # unless its too big, then move it to the right
                 if new_text_top < 0:
                     print("Scotoma too big!")
                     new_text_top = circle_center[1] - text_height // 2
-                    new_text_left = circle_center[0] + radius + 10
+                    new_text_left = circle_center[0] + scotoma_radius + 10
 
                 # Store the drawn text for the overla
-
                 self.overlay_text = read_frame[
                         text_top:text_top+text_height,
                         text_left:text_left+text_width,:]
                 
-
-                self.curve_text = frame[new_text_top:new_text_top+text_height,
-                        new_text_left:new_text_left+text_width,:]
+                # self.curve_text = frame[new_text_top:new_text_top+text_height,
+                #         new_text_left:new_text_left+text_width,:]
                 
                 self.last_draw_time = time.time()
                 self.just_drew = True
-                # frame[new_text_top:new_text_top+text_height,
-                #     new_text_left:new_text_left+text_width,] = read_frame[
-                #     text_top:text_top+text_height,
-                #     text_left:text_left+text_width,]
-                # time.sleep(5)
-                # draw box for debugging
-                #cv2.rectangle(ocr_frame, (text_left, text_top), (text_left+text_width, text_top+text_height), (0,0,0), 5)
 
             if self.overlay_text is not None:
                 self.overlay_text = self.overlay_text.astype(np.float32)
-                self.curve_text = self.curve_text.astype(np.float32)
-               # M = cv2.getPerspectiveTransform(self.overlay_text,self.curve_text)
-                #frame = cv2.warpPerspective(frame, M, frame.shape)
-                frame[new_text_top:new_text_top+text_height,
-                         new_text_left:new_text_left+text_width,:] = self.overlay_text
+                # self.curve_text = self.curve_text.astype(np.float32)
+                # M = cv2.getPerspectiveTransform(self.overlay_text,self.curve_text)
+                # frame = cv2.warpPerspective(frame, M, frame.shape)
+                frame[new_text_top: new_text_top+text_height,
+                      new_text_left: new_text_left+text_width,:] = self.overlay_text
                 
            
 
