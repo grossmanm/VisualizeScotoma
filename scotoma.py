@@ -29,6 +29,8 @@ class ScotomaWrapper(ft.UserControl):
         self.overlay_text = None
         self.curve_text = None
         self.prev_ocr_frame = None
+        self.prev_scotoma_frame = None
+        self.prev_scotoma_radius = scotoma_radius
 
     def did_mount(self):
         self.update_timer()
@@ -71,15 +73,22 @@ class ScotomaWrapper(ft.UserControl):
             # thresholding
             ocr_frame = cv2.adaptiveThreshold(ocr_frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, 6)
             #ocr_frame = cv2.threshold(ocr_frame, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
-            if type(self.prev_ocr_frame) is not type(None):
-                diff = cv2.absdiff(ocr_frame, self.prev_ocr_frame)
-                total_size = self.prev_ocr_frame.size
+
+            # to reduce noise we only consider the area around the scotoma
+            scotoma_frame = ocr_frame[circle_center[1]-scotoma_radius:circle_center[1]+scotoma_radius,
+                                      circle_center[0]-scotoma_radius:circle_center[0]+scotoma_radius]
+            if type(self.prev_ocr_frame) is not type(None) and scotoma_radius == self.prev_scotoma_radius:
+                diff = cv2.absdiff(scotoma_frame, self.prev_scotoma_frame)
+                total_size = self.prev_scotoma_frame.size
                 num_diff_pixels = np.count_nonzero(diff)
                 percent_diff = (num_diff_pixels/total_size)
-                print(percent_diff)
-                if percent_diff < 0.013:
+               # print(percent_diff)
+                if percent_diff < 0.15:
                    ocr_frame = self.prev_ocr_frame
+                   scotoma_frame = self.prev_scotoma_frame
             self.prev_ocr_frame = ocr_frame
+            self.prev_scotoma_frame = scotoma_frame
+            self.prev_scotoma_radius = scotoma_radius
 
             
             # https://stackoverflow.com/questions/60009533/drawing-bounding-boxes-with-pytesseract-opencv
@@ -90,7 +99,7 @@ class ScotomaWrapper(ft.UserControl):
             #           word or a small text region.
             # custom_config = r'-c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ --psm 6'
             # d = pytesseract.image_to_data(ocr_frame, output_type=pytesseract.Output.DICT, lang='eng', config=custom_config)
-            d = pytesseract.image_to_data(ocr_frame, output_type=pytesseract.Output.DICT)
+            d = pytesseract.image_to_data(scotoma_frame, output_type=pytesseract.Output.DICT)
            # print(d)
             n_boxes = len(d['level'])
 
@@ -99,11 +108,7 @@ class ScotomaWrapper(ft.UserControl):
                 self.just_drew = False
                 self.overlay_text = None
 
-            # for i in range(n_boxes):
-            #   if d['level'][i] == 5 and d['conf'][i] >= 40:
-            #       (x,y,w,h) = (d['left'][i], d['top'][i], d['width'][i],d['height'][i])
-            #        cv2.rectangle(ocr_frame, (x,y), (x+w, y+h), (255,255,255),2)
-
+            
 
             clean_output = {'left':[], 'top':[], 'width':[], 'height':[]}
             # clean up boxes to remove overlaps and certain levels
@@ -116,59 +121,47 @@ class ScotomaWrapper(ft.UserControl):
                 # 4. line
                 # 5. word
                 if d['level'][i] >= 2 and d['width'][i] < 200 and d['height'][i] < 200:
-                    cur_left = d['left'][i]
-                    cur_top = d['top'][i]
+                    cur_left = d['left'][i]+(circle_center[0]-scotoma_radius)
+                    cur_top = d['top'][i]+(circle_center[1]-scotoma_radius)
                     cur_width = d['width'][i]
                     cur_height = d['height'][i]
                     area_cur = cur_width*cur_height
 
                     overlap_indices = []
                     did_overlap = False
+                    largest = False
 
                     # check for overlaps
-                    for j in range(len(clean_output['left'])):
-                        old_left = clean_output['left'][j]
-                        old_top = clean_output['top'][j]
-                        old_width = clean_output['width'][j]
-                        old_height = clean_output['height'][j]
+                    for j in range(n_boxes):
+                        if j == i: 
+                            continue
+                        old_left = d['left'][j]+(circle_center[0]-scotoma_radius)
+                        old_top = d['top'][j]+(circle_center[1]-scotoma_radius)
+                        old_width = d['width'][j]
+                        old_height = d['height'][j]
 
-                        # calculate coordiantes of intersection rectangle
-                        x1 = max(cur_left, old_left)
-                        y1 = max(cur_top, old_top)
-                        x2 = min(cur_left+cur_width,old_left+old_width)
-                        y2 = min(cur_top+cur_height,old_top+old_height)
-
-                        if x2 <= x1 or y2 <= y1:
-                            # no overlap
+                        dx = min(cur_left+cur_width, old_left+old_width)-max(cur_left, old_left)
+                        dy = min(cur_top+cur_height, old_top+old_height)-max(cur_top, old_top)
+                        if (dx<0) or (dy<0):
                             continue
                         did_overlap = True
-                        intersection_area = (x2-x1)*(y2-y1)
-
+                        intersection_area = dx*dy
                         area_old = old_width*old_height
-
-                        overlap = (intersection_area/min(area_cur, area_old))
-                        
-                        # if the overlap is over 50% just use the bigger one:
-                        if overlap >= 0.5 and area_cur > area_old:
-                            overlap_indices.append(j)
-                          
-                    if len(overlap_indices) == 0 and not did_overlap:
+                        overlap=(intersection_area)/(min(area_cur,area_old))
+                        if overlap >=0.3 and area_cur > area_old:
+                            largest=True
+                    if not did_overlap or largest:
                         clean_output['left'].append(cur_left)
                         clean_output['top'].append(cur_top)
                         clean_output['width'].append(cur_width)
                         clean_output['height'].append(cur_height)
-                    else:
-                        num_pops = 0
-                        for j in overlap_indices:
-                            # remove overlaps
-                            clean_output['left'].pop(j-num_pops)
-                            clean_output['top'].pop(j-num_pops)
-                            clean_output['width'].pop(j-num_pops)
-                            clean_output['height'].pop(j-num_pops)
-                            num_pops+=1
                     
+            #for i in range(len(clean_output['left'])):
+               # (x,y,w,h) = (clean_output['left'][i], clean_output['top'][i], clean_output['width'][i],clean_output['height'][i])
+               # cv2.rectangle(frame, (x,y), (x+w, y+h), (255,255,255),2)
 
             # redraw text outside of scotoma
+            #print(1)
             for i in range(len(clean_output['left'])):
                 text_left = clean_output['left'][i]
                 text_top = clean_output['top'][i]
@@ -198,6 +191,7 @@ class ScotomaWrapper(ft.UserControl):
                 self.just_drew = True
 
             if self.overlay_text is not None:
+               # print(i)
                 self.overlay_text = self.overlay_text.astype(np.float32)
                 # self.curve_text = self.curve_text.astype(np.float32)
                 # M = cv2.getPerspectiveTransform(self.overlay_text,self.curve_text)
