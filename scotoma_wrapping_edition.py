@@ -5,6 +5,7 @@ import base64
 import pytesseract
 import math
 import time
+from scipy.ndimage import map_coordinates
 
 # initialize camera
 cap = cv2.VideoCapture(0)
@@ -12,6 +13,9 @@ cap = cv2.VideoCapture(0)
 # New libraries make camera sizes wonky for Yan and I. Forcing a standard size
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 400)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 400)
+
+# FOR TESTING, ON RUNTIME SHOULD BE SET TO 1 (0-1)
+blend_amount = 1
 
 if not cap.isOpened():
     print("Error: Unable to open camera. Camera didn't open successfully. Did you make sure it's not connected to ur phone and ur phone sync isn't being slow?")
@@ -49,9 +53,16 @@ def remap_image_around_scotoma(frame, scotoma_radius):
         new_x = np.clip(new_x, 0, image_width - 1)
         new_y = np.clip(new_y, 0, image_height - 1)
 
-        remapped_image = frame.copy()
-        remapped_image[~outside_scotoma_mask] = [0, 0, 0] # Not displaced is the sctoma
-        remapped_image[outside_scotoma_mask] = frame[new_y[outside_scotoma_mask], new_x[outside_scotoma_mask]]
+        remapped_image = np.zeros_like(frame)
+        for channel in range(frame.shape[2]):
+            remapped_image[:,:,channel] = map_coordinates(frame[:,:,channel], [new_y, new_x], order=1, mode='reflect')
+        
+        # Blend the remapped image with the original image
+        blended_image = frame.copy()
+        blended_image[outside_scotoma_mask] = blend_amount * remapped_image[outside_scotoma_mask] + \
+                                              (1 - blend_amount) * frame[outside_scotoma_mask]
+        blended_image[~outside_scotoma_mask] = [0, 0, 0]
+        return blended_image
         
         return remapped_image
 
