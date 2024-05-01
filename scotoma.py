@@ -5,6 +5,11 @@ import base64
 import pytesseract
 import time
 
+
+def check_overlap(x1,y1,w1,h1,x2,y2,w2,h2):
+    return not(x1+w1+5<=x2 or x1>=x2+w2+5 or y1+h1+5<=y2 or y1 >=y2+h2+5)
+
+
 # initialize camera
 cap = cv2.VideoCapture(0)
 
@@ -37,6 +42,7 @@ class ScotomaWrapper(ft.UserControl):
 
     # This will the the entry point to rendering the camera image on the screen.
     def update_timer(self):
+
         while True:
             _, frame = cap.read()
             image_dims = frame.shape
@@ -82,13 +88,17 @@ class ScotomaWrapper(ft.UserControl):
                 total_size = self.prev_scotoma_frame.size
                 num_diff_pixels = np.count_nonzero(diff)
                 percent_diff = (num_diff_pixels/total_size)
-               # print(percent_diff)
-                if percent_diff < 0.15:
+                if percent_diff < 0.1:
                    ocr_frame = self.prev_ocr_frame
                    scotoma_frame = self.prev_scotoma_frame
-            self.prev_ocr_frame = ocr_frame
-            self.prev_scotoma_frame = scotoma_frame
-            self.prev_scotoma_radius = scotoma_radius
+                else:
+                    self.prev_ocr_frame = ocr_frame
+                    self.prev_scotoma_frame = scotoma_frame
+                    self.prev_scotoma_radius = scotoma_radius
+            else:   
+                self.prev_ocr_frame = ocr_frame
+                self.prev_scotoma_frame = scotoma_frame
+                self.prev_scotoma_radius = scotoma_radius
 
             
             # https://stackoverflow.com/questions/60009533/drawing-bounding-boxes-with-pytesseract-opencv
@@ -110,8 +120,55 @@ class ScotomaWrapper(ft.UserControl):
 
             
 
-            clean_output = {'left':[], 'top':[], 'width':[], 'height':[]}
+            clean_output = {'left':[], 'top':[], 'width':[], 'height':[], 'text':[]}
             # clean up boxes to remove overlaps and certain levels
+            #print(d)
+            remove_idx = 0
+            for i in range(len(d['left'])):
+                if d['level'][i-remove_idx] < 2 or d['width'][i-remove_idx] >=scotoma_radius*2 or d['height'][i-remove_idx] >= scotoma_radius*2:
+                    d['left'].pop(i-remove_idx)
+                    d['top'].pop(i-remove_idx)
+                    d['width'].pop(i-remove_idx)
+                    d['height'].pop(i-remove_idx)
+                    d['level'].pop(i-remove_idx)
+                    remove_idx+=1
+            while len(d['left']) > 0:
+                cur_left = d['left'].pop(0)+(circle_center[0]-scotoma_radius)
+                cur_top = d['top'].pop(0)+(circle_center[1]-scotoma_radius)
+                cur_width = d['width'].pop(0)
+                cur_height = d['height'].pop(0)
+
+                merged_left = cur_left
+                merged_top = cur_top
+                merged_width = cur_width
+                merged_height = cur_height
+
+                i = 0
+                while i < len(d['left']):
+                    if check_overlap(merged_left,merged_top,merged_width,merged_height,
+                               d['left'][i]+(circle_center[0]-scotoma_radius),d['top'][i]+(circle_center[1]-scotoma_radius),
+                               d['width'][i],d['height'][i]):
+                        merged_left = min(merged_left,d['left'][i]+(circle_center[0]-scotoma_radius))
+                        merged_top = min(merged_top,d['top'][i]+(circle_center[1]-scotoma_radius))
+                        if merged_left+merged_width > d['left'][i]+(circle_center[0]-scotoma_radius)+d['width'][i]:
+                            merged_width=merged_width
+                        else:
+                            merged_width=d['width'][i]
+                        if merged_top+merged_height > d['top'][i]+(circle_center[1]-scotoma_radius)+d['height'][i]:
+                            merged_height=merged_height
+                        else:
+                            merged_height=d['height'][i]
+                        d['left'].pop(i)
+                        d['top'].pop(i)
+                        d['width'].pop(i)
+                        d['height'].pop(i)
+                    else:
+                        i+=1
+                clean_output['left'].append(merged_left)
+                clean_output['top'].append(merged_top)
+                clean_output['width'].append(merged_width)
+                clean_output['height'].append(merged_height)
+            '''
             for i in range(n_boxes):
                 # Filter out small, insignificant bounding box
                 # LEVELS:
@@ -148,17 +205,21 @@ class ScotomaWrapper(ft.UserControl):
                         intersection_area = dx*dy
                         area_old = old_width*old_height
                         overlap=(intersection_area)/(min(area_cur,area_old))
-                        if overlap >=0.3 and area_cur > area_old:
+                        print(overlap)
+                        print(area_cur)
+                        print(area_old)
+                        if overlap >=0.1 and area_cur > area_old:
                             largest=True
                     if not did_overlap or largest:
                         clean_output['left'].append(cur_left)
                         clean_output['top'].append(cur_top)
                         clean_output['width'].append(cur_width)
                         clean_output['height'].append(cur_height)
-                    
-            #for i in range(len(clean_output['left'])):
-               # (x,y,w,h) = (clean_output['left'][i], clean_output['top'][i], clean_output['width'][i],clean_output['height'][i])
-               # cv2.rectangle(frame, (x,y), (x+w, y+h), (255,255,255),2)
+                        clean_output['text'].append(d['text'][i])
+            '''
+            for i in range(len(clean_output['left'])):
+               (x,y,w,h) = (clean_output['left'][i], clean_output['top'][i], clean_output['width'][i],clean_output['height'][i])
+               cv2.rectangle(frame, (x,y), (x+w, y+h), (255,255,255),2)
 
             # redraw text outside of scotoma
             #print(1)
@@ -167,11 +228,18 @@ class ScotomaWrapper(ft.UserControl):
                 text_top = clean_output['top'][i]
                 text_width = clean_output['width'][i] 
                 text_height = clean_output['height'][i]
+               # print(clean_output['text'][i])
                 # text_test = clean_output['text'][i]
 
                 # for now just move the text above the circle
                 new_text_left = text_left
-                new_text_top = circle_center[1]-scotoma_radius-text_height
+                # check if above or below center of scotoma
+                if text_top <= circle_center[1]:
+                    new_text_top = circle_center[1]-scotoma_radius-text_height-(circle_center[1]-text_top)
+                else:
+                    new_text_top = circle_center[1]+scotoma_radius+(text_top-circle_center[1])
+
+                #new_text_top = circle_center[1]-scotoma_radius-text_height
 
                 # unless its too big, then move it to the right
                 if new_text_top < 0:
@@ -190,14 +258,14 @@ class ScotomaWrapper(ft.UserControl):
                 self.last_draw_time = time.time()
                 self.just_drew = True
 
-            if self.overlay_text is not None:
-               # print(i)
+               # if self.overlay_text is not None:
+                # print(i)
                 self.overlay_text = self.overlay_text.astype(np.float32)
                 # self.curve_text = self.curve_text.astype(np.float32)
                 # M = cv2.getPerspectiveTransform(self.overlay_text,self.curve_text)
                 # frame = cv2.warpPerspective(frame, M, frame.shape)
                 frame[new_text_top: new_text_top+text_height,
-                      new_text_left: new_text_left+text_width,:] = self.overlay_text
+                    new_text_left: new_text_left+text_width,:] = self.overlay_text
                 
            
 
