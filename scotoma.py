@@ -88,7 +88,7 @@ class ScotomaWrapper(ft.UserControl):
                 total_size = self.prev_scotoma_frame.size
                 num_diff_pixels = np.count_nonzero(diff)
                 percent_diff = (num_diff_pixels/total_size)
-                if percent_diff < 0.1:
+                if percent_diff < 0.05:
                    ocr_frame = self.prev_ocr_frame
                    scotoma_frame = self.prev_scotoma_frame
                 else:
@@ -125,7 +125,7 @@ class ScotomaWrapper(ft.UserControl):
             #print(d)
             remove_idx = 0
             for i in range(len(d['left'])):
-                if d['level'][i-remove_idx] < 2 or d['width'][i-remove_idx] >=scotoma_radius*2 or d['height'][i-remove_idx] >= scotoma_radius*2:
+                if d['level'][i-remove_idx] < 2 or (d['width'][i-remove_idx] >=scotoma_radius*2 and d['height'][i-remove_idx] >= scotoma_radius*2):
                     d['left'].pop(i-remove_idx)
                     d['top'].pop(i-remove_idx)
                     d['width'].pop(i-remove_idx)
@@ -217,9 +217,9 @@ class ScotomaWrapper(ft.UserControl):
                         clean_output['height'].append(cur_height)
                         clean_output['text'].append(d['text'][i])
             '''
-            for i in range(len(clean_output['left'])):
-               (x,y,w,h) = (clean_output['left'][i], clean_output['top'][i], clean_output['width'][i],clean_output['height'][i])
-               cv2.rectangle(frame, (x,y), (x+w, y+h), (255,255,255),2)
+            #for i in range(len(clean_output['left'])):
+            #   (x,y,w,h) = (clean_output['left'][i], clean_output['top'][i], clean_output['width'][i],clean_output['height'][i])
+            #   cv2.rectangle(frame, (x,y), (x+w, y+h), (255,255,255),2)
 
             # redraw text outside of scotoma
             #print(1)
